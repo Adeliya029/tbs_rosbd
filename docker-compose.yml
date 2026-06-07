@@ -1,0 +1,153 @@
+version: '3.9'
+
+services:
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: rosbd_zookeeper
+
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+    ports:
+      - "2181:2181"
+
+    networks:
+      - rosbd_network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: rosbd_kafka
+
+    depends_on:
+      - zookeeper
+
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+
+    environment:
+      KAFKA_BROKER_ID: 1
+
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+    networks:
+      - rosbd_network
+
+  spark-master:
+    image: apache/spark:3.5.0
+
+    container_name: rosbd_spark_master
+
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.master.Master
+      - --host
+      - spark-master
+      - --port
+      - "7077"
+
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+
+    networks:
+      - rosbd_network
+
+  spark-worker:
+    image: apache/spark:3.5.0
+
+    container_name: rosbd_spark_worker
+
+    depends_on:
+      - spark-master
+
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.worker.Worker
+      - spark://spark-master:7077
+
+    environment:
+      SPARK_WORKER_MEMORY: 2G
+      SPARK_WORKER_CORES: 2
+
+    ports:
+      - "8081:8081"
+
+    networks:
+      - rosbd_network
+
+  minio:
+    image: minio/minio:latest
+
+    container_name: rosbd_minio
+
+    command: server /data --console-address ":9001"
+
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: admin12345
+
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+    volumes:
+      - minio_data:/data
+
+    networks:
+      - rosbd_network
+
+  rosbd_postgres:
+    image: postgis/postgis:16-3.4
+
+    container_name: rosbd_postgres
+
+    environment:
+      POSTGRES_DB: seismic_db
+      POSTGRES_USER: rosbd
+      POSTGRES_PASSWORD: rosbd123
+      PGDATA: /var/lib/postgresql/data/pgdata
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    networks:
+      - rosbd_network
+
+
+  prefect:
+    build:
+      context: .
+      dockerfile: docker/prefect/Dockerfile
+
+    container_name: rosbd_prefect
+
+    depends_on:
+      - rosbd_postgres
+
+    environment:
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://rosbd:rosbd123@rosbd_postgres:5432/prefect_db
+
+    ports:
+      - "4200:4200"
+
+    networks:
+      - rosbd_network
+
+volumes:
+
+  postgres_data:
+
+  minio_data:
+
+networks:
+
+  rosbd_network:
+    driver: bridge

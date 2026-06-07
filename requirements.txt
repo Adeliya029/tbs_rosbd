@@ -1,0 +1,31 @@
+# Core Pipeline
+kafka-python==2.3.1
+requests==2.31.0
+pandas==2.1.4
+numpy==1.26.3
+minio==7.2.0
+python-dotenv==1.0.0
+
+# Web Scraping (untuk historical_web_scraper.py)
+beautifulsoup4==4.12.3
+lxml==5.2.2
+tqdm==4.66.5
+
+# Database
+psycopg2-binary==2.9.9
+asyncpg==0.29.0
+
+# Spark & Big Data
+pyspark==3.5.0
+
+# Orchestration (opsional)
+prefect==2.14.13
+schedule==1.2.1
+
+# Utilities
+logging
+json
+datetime
+io
+time
+typing
