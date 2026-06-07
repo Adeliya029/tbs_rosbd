@@ -1,21 +1,23 @@
 """
-TBS_ROSBD - Producer Data Gempa BMKG Realtime
-Mengambil data gempa dari BMKG dan mengirim ke Kafka.
-Tanpa schedule package, menggunakan simple loop.
+TBS_ROSBD - Realtime Producer Data Gempa BMKG
+Flow: BMKG Realtime API → Kafka Producer
+- Polling setiap 3 detik (POLLING_INTERVAL=3)
+- Publish ke dua topic: earthquake-events dan system-logs
+- Deduplication berdasarkan konten (lat, lon, mag, depth, datetime)
 """
 
 import os
 import sys
 import json
 import time
-import logging
 import hashlib
+import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import requests
 from kafka import KafkaProducer
-from kafka.errors import KafkaError
+from kafka.errors import KafkaError, NoBrokersAvailable
 
 # Setup logging
 LOG_DIR = os.environ.get("LOG_DIR", "logs")
@@ -52,8 +54,9 @@ BMKG_API_URL = os.environ.get(
     "https://data.bmkg.go.id/DataMKG/TEWS/autogempa.json"
 )
 
+# Polling interval 3 detik
 POLLING_INTERVAL = int(
-    os.environ.get("POLLING_INTERVAL", "2")  # <-- CHANGED: default 2 detik
+    os.environ.get("POLLING_INTERVAL", "3")
 )
 
 
@@ -62,7 +65,7 @@ class ProducerGempaBMKG:
 
     def __init__(self):
         self.producer = None
-        self.event_sudah_dikirim = set()  # Set of content hashes for deduplication
+        self.event_sudah_dikirim = set()  # Deduplication set
         self.koneksi_kafka()
 
     def koneksi_kafka(self):
@@ -80,6 +83,9 @@ class ProducerGempaBMKG:
             logger.info(f"Berhasil konek ke Kafka di {KAFKA_BOOTSTRAP_SERVERS}")
             self.kirim_log("PRODUCER_START", "Producer mulai berjalan", "INFO")
 
+        except NoBrokersAvailable:
+            logger.error(f"Tidak ada broker Kafka di {KAFKA_BOOTSTRAP_SERVERS}")
+            raise
         except Exception as e:
             logger.error(f"Gagal konek ke Kafka: {e}")
             self.kirim_log("PRODUCER_ERROR", f"Koneksi Kafka gagal: {str(e)}", "ERROR")
@@ -100,13 +106,13 @@ class ProducerGempaBMKG:
 
         try:
             self.producer.send(KAFKA_TOPIC_LOGS, value=log_event)
+            logger.debug(f"Log sent: {log_type} - {pesan}")
         except Exception as e:
             logger.warning(f"Gagal kirim log: {e}")
 
     def ambil_data_bmkg(self) -> Optional[List[Dict]]:
         """Ambil data gempa dari BMKG API."""
         try:
-            # Tambah user-agent untuk menghindari error 403
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             }
@@ -158,8 +164,7 @@ class ProducerGempaBMKG:
             depth_str = raw_event.get("Kedalaman", "0")
             depth = int(depth_str.replace("km", "").strip()) if isinstance(depth_str, str) else int(depth_str)
 
-            # Buat ID event yang STABIL berdasarkan konten (bukan timestamp)
-            # Ini penting agar event yang sama selalu dapat ID yang sama
+            # FIXED: Buat ID event yang STABIL berdasarkan konten (bukan timestamp)
             content_string = f"{datetime_str}_{latitude}_{longitude}_{magnitude}_{depth}"
             event_id = hashlib.md5(content_string.encode()).hexdigest()
 
@@ -172,6 +177,8 @@ class ProducerGempaBMKG:
                 "depth": depth,
                 "region": raw_event.get("Wilayah", raw_event.get("Dirasakan", "Tidak diketahui")),
                 "felt_intensity": raw_event.get("Dirasakan", ""),
+                "shakemap": raw_event.get("Shakemap", ""),
+                "potensi": raw_event.get("Potensi", ""),
                 "source": "BMKG_REALTIME",
                 "ingested_at": datetime.now(timezone.utc).isoformat()
             }
@@ -186,7 +193,7 @@ class ProducerGempaBMKG:
         """Kirim event gempa ke topic Kafka."""
         event_id = event["event_id"]
 
-        # Deduplication: cek apakah event dengan ID yang sama sudah dikirim
+        # FIXED: Deduplication - cek apakah event dengan ID sama sudah dikirim
         if event_id in self.event_sudah_dikirim:
             logger.info(f"Event {event_id[:8]}... sudah dikirim sebelumnya, dilewati (dedup)")
             return
