@@ -2,12 +2,43 @@
 
 ## 🚀 **SETUP CEPAT (SATU COMMAND)**
 
+### **1. Clone Repository**
 ```bash
-# 1. Pastikan Docker running
-# 2. Aktifkan virtual environment
-venv\Scripts\activate
+git clone <repository-url>
+cd tbs_rosbd_project
+```
 
-# 3. Jalankan setup sekali
+### **2. Setup Environment**
+```bash
+# Copy environment template
+cp .env.example .env
+
+# Edit .env file with your values
+# (Use default values for local development)
+```
+
+### **3. Install Dependencies**
+```bash
+# Create virtual environment (optional but recommended)
+python -m venv venv
+
+# Activate virtual environment
+# Windows:
+venv\Scripts\activate
+# Linux/Mac:
+source venv/bin/activate
+
+# Install packages
+pip install -r requirements.txt
+```
+
+### **4. Start Infrastructure**
+```bash
+# Start all Docker containers
+docker compose up -d
+
+# Wait for containers to be ready (30 seconds)
+# Or run the setup script:
 python setup_pipeline.py
 ```
 
@@ -42,40 +73,48 @@ python setup_pipeline.py
 - 30 records data historis BMKG di MinIO
 - Producer & Consumer Kafka siap testing
 
-## 🔧 **FILE UTAMA**
+## 🧪 **TEST PIPELINE**
 
-### **Realtime Pipeline (FIXED):**
-- `producer/realtime_producer.py` - Producer utama ✅
-- `producer/realtime_consumer.py` - Consumer utama ✅
-- `producer/test_producer.py` - Producer testing
-
-### **Historical Pipeline (FIXED):**
-- `batch/historical_web_scraper.py` - Web scraper utama ✅
-- `batch/historical_scraper_final.py` - API scraper alternatif
-- `batch/simple_historical_scrapper.py` - Scraper API BMKG
-
-### **Spark Jobs (siap jalan):**
-- `spark/jobs/kafka_to_minio.py` - Streaming: Kafka → MinIO
-- `spark/jobs/minio_to_postgres.py` - Batch: MinIO → PostgreSQL
-
-### **Setup Scripts:**
-- `setup_pipeline.py` - Setup semua (satu command) ✨
-- `setup_minio_buckets.py` - Setup bucket MinIO
-- `setup_postgres.sql` - Setup database PostgreSQL
-
-## 🧪 **TEST SETUP**
-
+### **Test 1: Producer**
 ```bash
-# Test 1: Producer → Kafka
 python producer/test_producer.py
-
-# Test 2: Consumer ← Kafka
-python producer/simple_kafka_consumer.py
-
-# Test 3: Cek MinIO
-python -c "from minio import Minio; client=Minio('localhost:9000','admin','admin12345',False); print([obj.object_name for obj in client.list_objects('historical-earthquake')])"
 ```
 
+### **Test 2: Consumer**
+```bash
+python producer/realtime_consumer.py
+```
+
+### **Test 3: Historical Data**
+```bash
+python batch/historical_web_scraper.py
+```
+
+## 🎯 **FILE STRUCTURE**
+
+### **Core Files:**
+```
+📁 tbs_rosbd_project/
+├── .env.example              # Environment template
+├── .gitignore               # Git ignore rules
+├── README.md                # Main documentation
+├── requirements.txt         # Python dependencies
+├── docker-compose.yml       # Docker containers
+├── setup_pipeline.py        # Auto setup script
+│
+├── producer/               # Realtime pipeline
+│   ├── realtime_producer.py    # Main producer
+│   ├── realtime_consumer.py    # Main consumer
+│   └── test_producer.py        # Test producer
+│
+├── batch/                  # Historical data
+│   └── historical_web_scraper.py  # Web scraper
+│
+├── spark/jobs/            # Spark processing
+│   ├── kafka_to_minio.py     # Streaming job
+│   └── minio_to_postgres.py  # Batch job
+
+```
 ## 🌐 **ACCESS POINTS**
 
 | Service | URL | Credentials |
@@ -86,24 +125,6 @@ python -c "from minio import Minio; client=Minio('localhost:9000','admin','admin
 | Kafka | localhost:9092 | - |
 | PostgreSQL | rosbd_postgres:5432 | rosbd / rosbd123 |
 
-## 🚨 **TROUBLESHOOTING**
-
-### **Jika Kafka error:**
-```bash
-docker compose restart kafka
-docker exec rosbd_kafka kafka-topics --bootstrap-server localhost:9092 --list
-```
-
-### **Jika MinIO error:**
-```bash
-docker compose restart minio
-python setup_minio_buckets.py
-```
-
-### **Jika PostgreSQL error:**
-```bash
-docker compose restart rosbd_postgres
-docker exec rosbd_postgres psql -U rosbd -d seismic_db -c "SELECT version();"
 ```
 
 ## 📞 **CREDENTIALS**
@@ -113,18 +134,3 @@ docker exec rosbd_postgres psql -U rosbd -d seismic_db -c "SELECT version();"
 - **Database:** seismic_db
 - **Kafka:** localhost:9092
 
-## 🎯 **STATUS PIPELINE**
-
-```
-✅ BMKG API → Producer → Kafka → Consumer
-✅ BMKG API → Historical Scraper → MinIO
-✅ Docker Infrastructure → Running
-✅ Spark Cluster → Active  
-✅ PostgreSQL → Ready with PostGIS
-⬜ Kafka → [Spark Streaming] → MinIO (siap jalan)
-⬜ MinIO → [Spark Batch] → PostgreSQL (siap jalan)
-⬜ [ML Training] → Models → [FastAPI] (next phase)
-⬜ [Dashboard] ← PostgreSQL (next phase)
-```
-
-**Pipeline dasar sudah berfungsi dan siap untuk dikembangkan!** 🚀
