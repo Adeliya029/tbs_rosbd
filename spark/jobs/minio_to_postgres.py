@@ -14,12 +14,12 @@ MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "admin12345")
 
 BUCKET_RAW = "raw-earthquake"
 
-# PostgreSQL configuration
-PG_HOST = "rosbd_postgres"
-PG_PORT = "5432"
-PG_DATABASE = "seismic_db"
-PG_USER = "rosbd"
-PG_PASSWORD = "rosbd123"
+# PostgreSQL configuration (bisa di-override via env var)
+PG_HOST = os.getenv("PG_HOST", "rosbd_postgres")
+PG_PORT = os.getenv("PG_PORT", "5432")
+PG_DATABASE = os.getenv("PG_DATABASE", "seismic_db")
+PG_USER = os.getenv("PG_USER", "rosbd")
+PG_PASSWORD = os.getenv("PG_PASSWORD", "rosbd123")
 
 PG_JDBC_URL = f"jdbc:postgresql://{PG_HOST}:{PG_PORT}/{PG_DATABASE}"
 PG_PROPERTIES = {

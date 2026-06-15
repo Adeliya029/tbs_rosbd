@@ -255,11 +255,6 @@ python producer/simple_kafka_consumer.py
 python -c "from minio import Minio; import sys; client = Minio('localhost:9000', 'admin', 'admin12345', False); print([obj.object_name for obj in client.list_objects('historical-earthquake')])"
 ```
 
-## NEXT STEPS UNTUK TIM
-1. **Spark Team**: Jalankan `spark/jobs/kafka_to_minio.py`
-2. **ML Team**: Setup Prefect flows dan training pipeline
-3. **Dashboard Team**: Buat FastAPI + Streamlit dashboard
-
 ## TROUBLESHOOTING
 - Kafka error: `docker compose restart kafka`
 - MinIO error: `docker compose restart minio`
