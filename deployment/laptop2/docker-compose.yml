@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
 
   minio:
@@ -19,7 +17,10 @@ services:
     restart: unless-stopped
 
   spark-master:
-    image: apache/spark:3.5.0
+    build:
+      context: ../../spark
+      dockerfile: Dockerfile
+    image: rosbd-spark:latest
     container_name: rosbd_spark_master
     command:
       - /opt/spark/bin/spark-class
@@ -34,12 +35,16 @@ services:
     volumes:
       - ../../spark/jobs:/opt/spark/jobs
       - ../../producer:/opt/spark/producer
+      - spark-ivy:/home/spark/.ivy2
     networks:
       - rosbd_network
     restart: unless-stopped
 
   spark-worker:
-    image: apache/spark:3.5.0
+    build:
+      context: ../../spark
+      dockerfile: Dockerfile
+    image: rosbd-spark:latest
     container_name: rosbd_spark_worker
     depends_on:
       - spark-master
@@ -55,6 +60,7 @@ services:
     volumes:
       - ../../spark/jobs:/opt/spark/jobs
       - ../../producer:/opt/spark/producer
+      - spark-ivy:/home/spark/.ivy2
     networks:
       - rosbd_network
     restart: unless-stopped
@@ -65,3 +71,4 @@ networks:
 
 volumes:
   minio_data:
+  spark-ivy:
