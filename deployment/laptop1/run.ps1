@@ -37,4 +37,4 @@ Write-Host ""
 
 # Run producer
 Set-Location -Path $ProjectRoot
-python producer/realtime_producer.py
+python producer/autogempa_producer.py
