@@ -1,4 +1,3 @@
-$ErrorActionPreference = "Stop"
 $Laptop2Dir = $PSScriptRoot
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
@@ -11,8 +10,8 @@ Write-Host ""
 # Step 1: Start Docker containers
 Write-Host "[1/4] Start MinIO & Spark containers..." -ForegroundColor Yellow
 Set-Location -Path $Laptop2Dir
-docker compose down 2>$null
-docker compose up -d
+docker compose down 2>&1 | Out-Null
+docker compose up -d 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Gagal start Docker containers" }
 Write-Host "  OK" -ForegroundColor Green
 
@@ -33,11 +32,11 @@ $buckets = @(
 $mcCmd = @"
 docker exec rosbd_minio mc alias set local http://localhost:9000 admin admin12345
 "@
-Invoke-Expression $mcCmd 2>$null
+Invoke-Expression $mcCmd 2>&1 | Out-Null
 
 foreach ($bucket in $buckets) {
     $cmd = "docker exec rosbd_minio mc mb local/$bucket --ignore-existing"
-    Invoke-Expression $cmd 2>$null
+    Invoke-Expression $cmd 2>&1 | Out-Null
     Write-Host "  Bucket: $bucket" -ForegroundColor Gray
 }
 Write-Host "  MinIO buckets created!" -ForegroundColor Green
@@ -51,7 +50,7 @@ Write-Host "  OK" -ForegroundColor Green
 # Step 4: Install Python dependencies
 Write-Host "[4/4] Install Python dependencies..." -ForegroundColor Yellow
 Set-Location -Path $ProjectRoot
-pip install -r requirements.txt
+pip install -r requirements.txt 2>&1
 if ($LASTEXITCODE -ne 0) { throw "Gagal install dependencies" }
 Write-Host "  OK" -ForegroundColor Green
 

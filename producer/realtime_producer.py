@@ -1,18 +1,20 @@
 """
-TBS_ROSBD - Realtime Producer Data Gempa BMKG
-Flow: BMKG Realtime API → Kafka Producer
-- Polling setiap 3 detik (POLLING_INTERVAL=3)
+TBS_ROSBD - Realtime Producer Data Gempa BMKG (InaTEWS)
+Flow: BMKG InaTEWS CAP Alert + GeoJSON → Kafka Producer
+- Polling realtime (datagempa.json) setiap POLLING_INTERVAL detik
+- Polling batch (gempaQL.json) setiap BATCH_POLL_INTERVAL detik
 - Publish ke dua topic: earthquake-events dan system-logs
-- Deduplication berdasarkan konten (lat, lon, mag, depth, datetime)
+- Deduplication berdasarkan BMKG event ID
+- Sumber: https://inatews.bmkg.go.id (Google Cloud Storage)
 """
 
 import os
 import sys
 import json
 import time
-import hashlib
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Dict, List, Optional
 
 import requests
@@ -49,14 +51,20 @@ KAFKA_TOPIC_LOGS = os.environ.get(
     "system-logs"
 )
 
-BMKG_API_URL = os.environ.get(
-    "BMKG_API_URL", 
-    "https://data.bmkg.go.id/DataMKG/TEWS/autogempa.json"
+# Real-time alert endpoint (CAP format) - update <1 menit, poll tiap 30 detik
+BMKG_API_URL_REALTIME = os.environ.get(
+    "BMKG_API_URL_REALTIME", 
+    "https://bmkg-content-inatews.storage.googleapis.com/datagempa.json"
 )
 
-# Polling interval 3 detik
+# Batch endpoint (GeoJSON) - update tiap ~10 menit, poll tiap 5 menit
+BMKG_API_URL_BATCH = os.environ.get(
+    "BMKG_API_URL_BATCH", 
+    "https://bmkg-content-inatews.storage.googleapis.com/gempaQL.json"
+)
+
 POLLING_INTERVAL = int(
-    os.environ.get("POLLING_INTERVAL", "3")
+    os.environ.get("POLLING_INTERVAL", "30")
 )
 
 
@@ -66,6 +74,8 @@ class ProducerGempaBMKG:
     def __init__(self):
         self.producer = None
         self.event_sudah_dikirim = set()  # Deduplication set
+        self.last_identifier = None  # Untuk tracking gempa baru dari datagempa
+        self.last_batch_poll = 0  # Timestamp terakhir poll gempaQL
         self.koneksi_kafka()
 
     def koneksi_kafka(self):
@@ -111,7 +121,7 @@ class ProducerGempaBMKG:
             logger.warning(f"Gagal kirim log: {e}")
 
     def ambil_data_bmkg(self) -> Optional[List[Dict]]:
-        """Ambil data gempa dari BMKG API."""
+        """Ambil data gempa dari BMKG InaTEWS GeoJSON API."""
         try:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -121,15 +131,9 @@ class ProducerGempaBMKG:
             response.raise_for_status()
             data = response.json()
 
-            # Parse struktur JSON BMKG
-            if "Infogempa" in data and "gempa" in data["Infogempa"]:
-                events = data["Infogempa"]["gempa"]
-
-                # autogempa return dict tunggal
-                if isinstance(events, dict):
-                    events = [events]
-
-                return events
+            # Parse GeoJSON FeatureCollection dari InaTEWS
+            if "features" in data:
+                return data["features"]
 
             return []
 
@@ -144,42 +148,39 @@ class ProducerGempaBMKG:
             return None
 
     def normalisasi_event(self, raw_event: Dict) -> Optional[Dict]:
-        """Normalisasi data raw BMKG ke format standar."""
+        """Normalisasi data GeoJSON InaTEWS ke format standar."""
         try:
-            # Parse datetime dari format BMKG
-            datetime_str = raw_event.get(
-                "DateTime", 
-                raw_event.get("Tanggal", "") + " " + raw_event.get("Jam", "")
-            )
+            props = raw_event.get("properties", {})
+            geom = raw_event.get("geometry", {})
+            coords = geom.get("coordinates", [0, 0, 0])
 
-            # Parse koordinat
-            coordinates = raw_event.get("Coordinates", "0,0").split(",")
-            latitude = float(coordinates[0].strip()) if len(coordinates) > 0 else 0.0
-            longitude = float(coordinates[1].strip()) if len(coordinates) > 1 else 0.0
+            event_id = props.get("id", "unknown")
+            latitude = float(coords[1]) if len(coords) > 1 else 0.0
+            longitude = float(coords[0]) if len(coords) > 0 else 0.0
+            magnitude = float(props.get("mag", 0))
+            depth = float(props.get("depth", 0))
+            datetime_str = props.get("time", "")
 
-            # Parse magnitude dan kedalaman
-            magnitude_str = raw_event.get("Magnitude", "0.0")
-            magnitude = float(magnitude_str.replace("SR", "").strip()) if isinstance(magnitude_str, str) else float(magnitude_str)
+            # Konversi UTC → WIB
+            try:
+                dt_utc = datetime.fromisoformat(datetime_str.replace(" ", "T"))
+                dt_utc = dt_utc.replace(tzinfo=ZoneInfo("UTC"))
+                dt_wib = dt_utc.astimezone(ZoneInfo("Asia/Jakarta"))
+                datetime_wib = dt_wib.strftime("%Y-%m-%d %H:%M:%S WIB")
+            except Exception:
+                datetime_wib = datetime_str
 
-            depth_str = raw_event.get("Kedalaman", "0")
-            depth = int(depth_str.replace("km", "").strip()) if isinstance(depth_str, str) else int(depth_str)
-
-            # FIXED: Buat ID event yang STABIL berdasarkan konten (bukan timestamp)
-            content_string = f"{datetime_str}_{latitude}_{longitude}_{magnitude}_{depth}"
-            event_id = hashlib.md5(content_string.encode()).hexdigest()
+            region = props.get("place", "Tidak diketahui")
 
             normalized = {
                 "event_id": event_id,
-                "datetime": datetime_str,
+                "datetime": datetime_wib,
                 "latitude": latitude,
                 "longitude": longitude,
-                "magnitude": magnitude,
-                "depth": depth,
-                "region": raw_event.get("Wilayah", raw_event.get("Dirasakan", "Tidak diketahui")),
-                "felt_intensity": raw_event.get("Dirasakan", ""),
-                "shakemap": raw_event.get("Shakemap", ""),
-                "potensi": raw_event.get("Potensi", ""),
-                "source": "BMKG_REALTIME",
+                "magnitude": round(magnitude, 1),
+                "depth": int(round(depth)),
+                "region": region,
+                "source": "BMKG_INATEWS",
                 "ingested_at": datetime.now(timezone.utc).isoformat()
             }
 
@@ -193,9 +194,8 @@ class ProducerGempaBMKG:
         """Kirim event gempa ke topic Kafka."""
         event_id = event["event_id"]
 
-        # FIXED: Deduplication - cek apakah event dengan ID sama sudah dikirim
         if event_id in self.event_sudah_dikirim:
-            logger.info(f"Event {event_id[:8]}... sudah dikirim sebelumnya, dilewati (dedup)")
+            logger.debug(f"DEDUP: {event_id[:8]} | {event['region']} | Mag {event['magnitude']}")
             return
 
         try:
@@ -208,12 +208,11 @@ class ProducerGempaBMKG:
             record_metadata = future.get(timeout=10)
 
             logger.info(
-                f"Kirim event {event_id[:8]}... ke "
-                f"partition {record_metadata.partition}, "
-                f"offset {record_metadata.offset} | "
-                f"Mag {event['magnitude']} | "
-                f"Lat {event['latitude']} Lon {event['longitude']} | "
-                f"Depth {event['depth']}km"
+                f"[TERKIRIM] Mag {event['magnitude']} | "
+                f"{event['region']} | "
+                f"Koordinat: {event['latitude']}, {event['longitude']} | "
+                f"Depth: {event['depth']}km | "
+                f"Waktu: {event['datetime']}"
             )
 
             self.event_sudah_dikirim.add(event_id)
@@ -267,7 +266,7 @@ class ProducerGempaBMKG:
     def jalankan(self):
         """Loop utama dengan simple polling."""
         logger.info(f"Producer TBS_ROSBD mulai. Polling setiap {POLLING_INTERVAL} detik")
-        logger.info(f"Deduplication aktif: event dengan lat/lon/mag/depth/datetime sama akan dilewati")
+        logger.info(f"Deduplication aktif: event dengan BMKG ID sama akan dilewati")
 
         try:
             while True:

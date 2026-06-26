@@ -11,6 +11,9 @@ beautifulsoup4==4.12.3
 lxml==5.2.2
 tqdm==4.66.5
 
+# Parquet export (untuk ML training)
+fastparquet==2026.5.0
+
 # Database
 psycopg2-binary==2.9.9
 asyncpg==0.29.0

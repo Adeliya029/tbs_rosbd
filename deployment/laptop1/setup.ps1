@@ -1,5 +1,4 @@
-$ErrorActionPreference = "Stop"
-$ProjectRoot = Split-Path -Parent $PSScriptRoot
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $Laptop1Dir = $PSScriptRoot
 
 Write-Host "============================================" -ForegroundColor Cyan
@@ -16,8 +15,8 @@ Write-Host "  OK" -ForegroundColor Green
 # Step 2: Start Docker containers
 Write-Host "[2/5] Start Zookeeper & Kafka containers..." -ForegroundColor Yellow
 Set-Location -Path $Laptop1Dir
-docker compose down 2>$null
-docker compose up -d
+docker compose down 2>&1 | Out-Null
+docker compose up -d 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Gagal start Docker containers" }
 Write-Host "  OK" -ForegroundColor Green
 
@@ -29,28 +28,28 @@ Start-Sleep -Seconds 15
 $retries = 0
 $maxRetries = 10
 do {
-    $result = docker exec rosbd_kafka kafka-topics --bootstrap-server localhost:9092 --list 2>$null
-    if ($result) { break }
+    $null = docker exec rosbd_kafka /usr/bin/kafka-topics --bootstrap-server localhost:9092 --list 2>&1
+    if ($LASTEXITCODE -eq 0) { break }
     $retries++
     Start-Sleep -Seconds 3
     Write-Host "  Menunggu Kafka... ($retries/$maxRetries)" -ForegroundColor Gray
 } while ($retries -lt $maxRetries)
 
-if (-not $result) { throw "Kafka tidak siap setelah $maxRetries percobaan" }
+if ($LASTEXITCODE -ne 0) { throw "Kafka tidak siap setelah $maxRetries percobaan" }
 Write-Host "  Kafka siap!" -ForegroundColor Green
 
 # Step 4: Create Kafka topics
 Write-Host "[4/5] Creating Kafka topics..." -ForegroundColor Yellow
-docker exec rosbd_kafka kafka-topics --bootstrap-server localhost:9092 --create --topic earthquake-events --partitions 1 --replication-factor 1 --if-not-exists
-docker exec rosbd_kafka kafka-topics --bootstrap-server localhost:9092 --create --topic system-logs --partitions 1 --replication-factor 1 --if-not-exists
+docker exec rosbd_kafka /usr/bin/kafka-topics --bootstrap-server localhost:9092 --create --topic earthquake-events --partitions 1 --replication-factor 1 --if-not-exists 2>&1
+docker exec rosbd_kafka /usr/bin/kafka-topics --bootstrap-server localhost:9092 --create --topic system-logs --partitions 1 --replication-factor 1 --if-not-exists 2>&1
 
-$topics = docker exec rosbd_kafka kafka-topics --bootstrap-server localhost:9092 --list
+$topics = docker exec rosbd_kafka /usr/bin/kafka-topics --bootstrap-server localhost:9092 --list 2>&1
 Write-Host "  Topics: $topics" -ForegroundColor Green
 
 # Step 5: Install Python dependencies
 Write-Host "[5/5] Install Python dependencies..." -ForegroundColor Yellow
 Set-Location -Path $ProjectRoot
-pip install -r requirements.txt
+pip install -r requirements.txt 2>&1
 if ($LASTEXITCODE -ne 0) { throw "Gagal install dependencies" }
 Write-Host "  OK" -ForegroundColor Green
 

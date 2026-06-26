@@ -1,5 +1,5 @@
 """
-Test Producer untuk BMKG API.
+Test Producer untuk BMKG InaTEWS GeoJSON API.
 Mengambil data sekali dan kirim ke Kafka.
 """
 
@@ -20,7 +20,7 @@ logger = logging.getLogger("test_producer")
 # Konfigurasi
 KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
 KAFKA_TOPIC_EARTHQUAKE = "earthquake-events"
-BMKG_API_URL = "https://data.bmkg.go.id/DataMKG/TEWS/autogempa.json"
+BMKG_API_URL = "https://bmkg-content-inatews.storage.googleapis.com/gempaQL.json"
 
 def koneksi_kafka():
     """Membuat koneksi ke Kafka."""
@@ -50,11 +50,8 @@ def ambil_data_bmkg() -> Optional[List[Dict]]:
         response.raise_for_status()
         data = response.json()
 
-        if "Infogempa" in data and "gempa" in data["Infogempa"]:
-            events = data["Infogempa"]["gempa"]
-            if isinstance(events, dict):
-                events = [events]
-            return events
+        if "features" in data:
+            return data["features"]
 
         return []
 
@@ -65,30 +62,27 @@ def ambil_data_bmkg() -> Optional[List[Dict]]:
 def normalisasi_event(raw_event: Dict) -> Optional[Dict]:
     """Normalisasi data raw BMKG ke format standar."""
     try:
-        datetime_str = raw_event.get("DateTime", "")
-        
-        coordinates = raw_event.get("Coordinates", "0,0").split(",")
-        latitude = float(coordinates[0].strip()) if len(coordinates) > 0 else 0.0
-        longitude = float(coordinates[1].strip()) if len(coordinates) > 1 else 0.0
+        props = raw_event.get("properties", {})
+        geom = raw_event.get("geometry", {})
+        coords = geom.get("coordinates", [0, 0, 0])
 
-        magnitude_str = raw_event.get("Magnitude", "0.0")
-        magnitude = float(magnitude_str.replace("SR", "").strip()) if isinstance(magnitude_str, str) else float(magnitude_str)
-
-        depth_str = raw_event.get("Kedalaman", "0")
-        depth = int(depth_str.replace("km", "").strip()) if isinstance(depth_str, str) else int(depth_str)
-
-        event_id = f"BMKG_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{latitude}_{longitude}"
+        event_id = props.get("id", "unknown")
+        latitude = float(coords[1]) if len(coords) > 1 else 0.0
+        longitude = float(coords[0]) if len(coords) > 0 else 0.0
+        magnitude = float(props.get("mag", 0))
+        depth = float(props.get("depth", 0))
+        datetime_str = props.get("time", "")
+        region = props.get("place", "Tidak diketahui")
 
         normalized = {
             "event_id": event_id,
             "datetime": datetime_str,
             "latitude": latitude,
             "longitude": longitude,
-            "magnitude": magnitude,
-            "depth": depth,
-            "region": raw_event.get("Wilayah", raw_event.get("Dirasakan", "Tidak diketahui")),
-            "felt_intensity": raw_event.get("Dirasakan", ""),
-            "source": "BMKG_REALTIME",
+            "magnitude": round(magnitude, 1),
+            "depth": int(round(depth)),
+            "region": region,
+            "source": "BMKG_INATEWS",
             "ingested_at": datetime.now(timezone.utc).isoformat()
         }
 
