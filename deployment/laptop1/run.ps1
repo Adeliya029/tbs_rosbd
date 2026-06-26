@@ -30,11 +30,11 @@ Write-Host "Kafka       : $env:KAFKA_BOOTSTRAP_SERVERS" -ForegroundColor Gray
 Write-Host "Topic Gempa : $env:KAFKA_TOPIC_EARTHQUAKE" -ForegroundColor Gray
 Write-Host "Topic Logs  : $env:KAFKA_TOPIC_LOGS" -ForegroundColor Gray
 Write-Host "Interval    : $env:POLLING_INTERVAL detik" -ForegroundColor Gray
-Write-Host "BMKG API    : $env:BMKG_API_URL" -ForegroundColor Gray
+Write-Host "BMKG Live30 : $env:BMKG_API_URL_LIVE30" -ForegroundColor Gray
 Write-Host ""
 Write-Host "Tekan Ctrl+C untuk berhenti" -ForegroundColor Yellow
 Write-Host ""
 
 # Run producer
 Set-Location -Path $ProjectRoot
-python producer/autogempa_producer.py
+python producer/inatews_producer.py
