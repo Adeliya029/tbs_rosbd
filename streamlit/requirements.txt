@@ -1,0 +1,5 @@
+streamlit==1.40.0
+pandas==2.2.3
+psycopg2-binary==2.9.10
+folium==0.18.0
+streamlit-folium==0.24.0
