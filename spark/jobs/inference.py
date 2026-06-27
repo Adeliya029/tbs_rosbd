@@ -8,9 +8,6 @@ def predict_snapshot(feature_dict):
     rf_model, iso_model = load_models()
 
     rf_features = pd.DataFrame([{
-        "magnitude":
-            feature_dict["magnitude"],
-
         "depth_km":
             feature_dict["depth_km"],
 
@@ -40,9 +37,6 @@ def predict_snapshot(feature_dict):
     }])
 
     iso_features = pd.DataFrame([{
-        "magnitude":
-            feature_dict["magnitude"],
-
         "depth_km":
             feature_dict["depth_km"],
 

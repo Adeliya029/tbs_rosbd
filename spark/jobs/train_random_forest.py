@@ -1,14 +1,14 @@
 import io
 import joblib
 import boto3
+import numpy as np
 import pandas as pd
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import classification_report
 
 
-MINIO_ENDPOINT = "http://minio:9000"
+MINIO_ENDPOINT = "http://localhost:9000"
 MINIO_ACCESS_KEY = "admin"
 MINIO_SECRET_KEY = "admin12345"
 
@@ -18,7 +18,6 @@ MODEL_BUCKET = "trained-models"
 DATA_FILE = "historical/training_dataset.parquet"
 
 FEATURES = [
-    "magnitude",
     "depth_km",
     "quake_count_24h",
     "avg_magnitude_24h",
@@ -56,18 +55,23 @@ def main():
 
     df = pd.read_parquet(dataset_buffer)
 
-    X = df[FEATURES]
-    y = df[TARGET]
+    df = df.sort_values("snapshot_date")
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42,
-        stratify=y
-    )
+    split_idx = int(len(df) * 0.8)
+    train_df = df.iloc[:split_idx]
+    test_df = df.iloc[split_idx:]
 
-    print("Training Random Forest...")
+    X_train = train_df[FEATURES]
+    y_train = train_df[TARGET]
+    X_test = test_df[FEATURES]
+    y_test = test_df[TARGET]
+
+    print(f"Train snapshots: {len(train_df)}")
+    print(f"Test snapshots : {len(test_df)}")
+    print(f"Train period  : {train_df['snapshot_date'].min()} -> {train_df['snapshot_date'].max()}")
+    print(f"Test period   : {test_df['snapshot_date'].min()} -> {test_df['snapshot_date'].max()}")
+
+    print("\nTraining Random Forest...")
 
     model = RandomForestClassifier(
         n_estimators=300,
@@ -80,10 +84,8 @@ def main():
 
     predictions = model.predict(X_test)
 
-    print(
-        "Accuracy:",
-        accuracy_score(y_test, predictions)
-    )
+    print("\nEvaluation:")
+    print(classification_report(y_test, predictions))
 
     model_buffer = io.BytesIO()
 

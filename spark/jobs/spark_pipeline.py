@@ -16,6 +16,8 @@ from pyspark.sql.types import (
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col,
+    coalesce,
+    regexp_replace,
     to_timestamp,
     when,
     lit,
@@ -43,9 +45,9 @@ MINIO_SECRET_KEY = "admin12345"
 RAW_PATH = "s3a://raw-earthquake/earthquake-events/"
 PROCESSED_PATH = "s3a://processed-features/events/"
 SNAPSHOT_PATH = "s3a://processed-features/snapshot_24h/"
-CHECKPOINT_PATH = "s3a://processed-features/checkpoints/spark-pipeline/"
+CHECKPOINT_PATH = "/opt/spark/checkpoints/earthquake-pipeline"
 
-FASTAPI_URL = "http://100.71.251.60:8000/api/inference/risk-score"
+FASTAPI_URL = "http://100.71.251.60:8000/api/predict"
 
 
 # =========================
@@ -87,6 +89,7 @@ spark = (
         "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider"
     )
     .config("spark.hadoop.fs.s3a.endpoint.region", "us-east-1")
+    .config("spark.sql.legacy.timeParserPolicy", "LEGACY")
     .getOrCreate()
 )
 
@@ -189,7 +192,15 @@ def process_batch(batch_df, batch_id):
         parsed_df
         .withColumn(
             "event_time",
-            to_timestamp(col("datetime"))
+            coalesce(
+                to_timestamp(col("datetime"), "yyyy-MM-dd HH:mm:ss"),
+                to_timestamp(
+                    regexp_replace(col("datetime"), r" (WIB|WITA|WIT)$", ""),
+                    "yyyy-MM-dd HH:mm:ss"
+                ),
+                to_timestamp(col("datetime"), "yyyy-MM-dd'T'HH:mm:ssXXX"),
+                to_timestamp(col("datetime"), "yyyy-MM-dd'T'HH:mm:ss")
+            )
         )
         .withColumn(
             "depth_km",
@@ -390,10 +401,6 @@ def process_batch(batch_df, batch_id):
             swarm_udf(col("region"))
         )
         .withColumn(
-            "magnitude",
-            col("max_magnitude_24h")
-        )
-        .withColumn(
             "snapshot_created_at",
             current_timestamp()
         )
@@ -437,9 +444,6 @@ def process_batch(batch_df, batch_id):
             ),
             "longitude": float(
                 row["longitude"]
-            ),
-            "magnitude": float(
-                row["magnitude"]
             ),
             "depth_km": float(
                 row["depth_km"]
@@ -490,7 +494,7 @@ raw_stream = (
         KAFKA_BOOTSTRAP_SERVERS
     )
     .option("subscribe", KAFKA_TOPIC)
-    .option("startingOffsets", "latest")
+    .option("startingOffsets", "earliest")
     .load()
 )
 
@@ -515,7 +519,7 @@ print("SPARK STREAMING PIPELINE STARTED")
 print(f"Kafka     : {KAFKA_BOOTSTRAP_SERVERS}")
 print(f"Topic     : {KAFKA_TOPIC}")
 print(f"FastAPI   : {FASTAPI_URL}")
-print(f"Trigger   : 60 detik")
+print(f"Trigger   : 10 detik")
 print("=" * 50)
 print("Flow: Kafka -> Feature Engineering -> ST-DBSCAN -> MinIO + FastAPI")
 print("=" * 50)

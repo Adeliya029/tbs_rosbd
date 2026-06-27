@@ -8,7 +8,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, to_timestamp
 
 # Konfigurasi
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "rosbd_minio:9000")
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "admin12345")
 
@@ -34,10 +34,6 @@ def main():
     # Buat Spark session
     spark = SparkSession.builder \
         .appName("MinIOToPostgreSQL-Earthquake") \
-        .config("spark.jars.packages",
-                "org.apache.hadoop:hadoop-aws:3.3.4,"
-                "com.amazonaws:aws-java-sdk-bundle:1.12.262,"
-                "org.postgresql:postgresql:42.7.3") \
         .config("spark.hadoop.fs.s3a.endpoint", f"http://{MINIO_ENDPOINT}") \
         .config("spark.hadoop.fs.s3a.access.key", MINIO_ACCESS_KEY) \
         .config("spark.hadoop.fs.s3a.secret.key", MINIO_SECRET_KEY) \
@@ -63,7 +59,7 @@ def main():
         
         # Coba baca data, jika tidak ada file, tangani gracefully
         try:
-            df = spark.read.parquet(minio_path)
+            df = spark.read.json(minio_path)
             record_count = df.count()
             
             if record_count == 0:
