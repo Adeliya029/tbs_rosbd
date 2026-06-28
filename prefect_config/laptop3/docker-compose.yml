@@ -1,0 +1,125 @@
+version: "3.9"
+
+# ═══════════════════════════════════════════════════════
+#  LAPTOP 3 — Prefect Server + MinIO + PostgreSQL
+#
+#  Peran : Server utama — koordinator semua worker
+#  Harus : Nyala DULUAN sebelum laptop 1 dan 2
+#  Expose: port 4200 (Prefect), 9000-9001 (MinIO), 5432 (PG)
+#          semua port ini harus bisa diakses laptop 1 & 2
+# ═══════════════════════════════════════════════════════
+
+networks:
+  seismic_net:
+    driver: bridge
+
+volumes:
+  minio_data:
+  postgres_data:
+  prefect_data:
+
+services:
+
+  # ──────────────────────────────
+  #  PREFECT SERVER
+  #  Koordinator semua worker di semua laptop
+  #  UI: http://localhost:4200  (atau http://IP_LAPTOP3:4200 dari laptop lain)
+  # ──────────────────────────────
+  prefect-server:
+    image: prefecthq/prefect:2.16-python3.11
+    container_name: seismic_prefect_server
+    restart: unless-stopped
+    command: prefect server start --host 0.0.0.0 --port 4200
+    ports:
+      - "4200:4200"
+    environment:
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+      PREFECT_API_DATABASE_CONNECTION_URL: sqlite+aiosqlite:////prefect/prefect.db
+      PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+    volumes:
+      - prefect_data:/prefect
+    networks:
+      - seismic_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4200/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ──────────────────────────────
+  #  MINIO — Data Lake
+  #  Diakses oleh semua laptop (worker scraping, training, fastapi)
+  #  API  : http://IP_LAPTOP3:9000
+  #  UI   : http://IP_LAPTOP3:9001
+  # ──────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: seismic_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-seismic_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-seismic_secret_2024}
+    volumes:
+      - minio_data:/data
+    networks:
+      - seismic_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ──────────────────────────────
+  #  MINIO INIT — buat semua bucket saat pertama kali
+  # ──────────────────────────────
+  minio-init:
+    image: minio/mc:latest
+    container_name: seismic_minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - seismic_net
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-seismic_admin} ${MINIO_ROOT_PASSWORD:-seismic_secret_2024}
+      mc mb --ignore-existing local/raw-earthquake
+      mc mb --ignore-existing local/historical-earthquake
+      mc mb --ignore-existing local/processed-features
+      mc mb --ignore-existing local/trained-models
+      mc mb --ignore-existing local/backup
+      echo 'Buckets ready:'
+      mc ls local
+      "
+    restart: "no"
+
+  # ──────────────────────────────
+  #  POSTGRESQL + POSTGIS
+  #  Menyimpan hasil prediksi dari FastAPI
+  #  Expose ke semua laptop yang butuh akses DB
+  # ──────────────────────────────
+  postgresql:
+    image: postgis/postgis:15-3.4
+    container_name: seismic_postgresql
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-seismic_db}
+      POSTGRES_USER: ${POSTGRES_USER:-seismic_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-seismic_pass_2024}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgresql/init.sql:/docker-entrypoint-initdb.d/01_init.sql
+    networks:
+      - seismic_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-seismic_user} -d ${POSTGRES_DB:-seismic_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

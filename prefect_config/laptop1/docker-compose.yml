@@ -1,5 +1,14 @@
+version: "3.9"
+
+networks:
+  rosbd_network:
+    driver: bridge
+
 services:
 
+  # ──────────────────────────────
+  #  ZOOKEEPER — Kafka coordinator
+  # ──────────────────────────────
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     container_name: rosbd_zookeeper
@@ -11,6 +20,12 @@ services:
       - rosbd_network
     restart: unless-stopped
 
+  # ──────────────────────────────
+  #  KAFKA — Broker dengan Tailscale listener
+  #  PLAINTEXT      → internal Docker (kafka:29092)
+  #  PLAINTEXT_HOST → localhost akses producer (localhost:9092)
+  #  PLAINTEXT_TS   → Tailscale akses Laptop 2 (100.76.33.80:9093)
+  # ──────────────────────────────
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     container_name: rosbd_kafka
@@ -22,15 +37,9 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-
-      # 3 listeners:
-      #   PLAINTEXT  -> internal Docker (kafka:29092)
-      #   PLAINTEXT_HOST -> localhost akses producer (localhost:9092)
-      #   PLAINTEXT_TS  -> Tailscale akses Laptop 2 (100.76.33.80:9093)
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,PLAINTEXT_TS:PLAINTEXT
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092,PLAINTEXT_TS://0.0.0.0:9093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092,PLAINTEXT_TS://100.76.33.80:9093
-
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     networks:
@@ -40,6 +49,7 @@ services:
   # ──────────────────────────────
   #  PREFECT WORKER — scraping-pool
   #  Poll ke Prefect Server di Laptop 3 (Tailscale: 100.71.251.60)
+  #  Eksekusi: historical_scraping_flow, health_check_flow
   # ──────────────────────────────
   prefect-worker-scraping:
     build:
@@ -76,8 +86,9 @@ services:
       - rosbd_network
 
   # ──────────────────────────────
-  #  PREFECT DEPLOYMENT — register flow ke server (run sekali)
-  #  docker compose --profile deploy run prefect-deploy
+  #  PREFECT DEPLOYMENT — register flow ke server
+  #  Jalankan SEKALI setelah worker pertama kali naik
+  #  Command: docker compose --profile deploy run prefect-deploy
   # ──────────────────────────────
   prefect-deploy:
     build:
@@ -113,7 +124,3 @@ services:
     profiles:
       - deploy
     restart: "no"
-
-networks:
-  rosbd_network:
-    driver: bridge

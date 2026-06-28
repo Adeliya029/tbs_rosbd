@@ -1,0 +1,94 @@
+version: "3.9"
+
+# ═══════════════════════════════════════════════════════
+#  LAPTOP 2 — Prefect Worker (Training Pool)
+#
+#  Peran : Eksekusi ML training pipeline
+#  Butuh : Laptop 3 sudah nyala dan scraping sudah selesai
+#  Flows : ml_training_flow, aggregation_flow,
+#          baseline_update_flow, backup_flow
+#  Pool  : training-pool
+# ═══════════════════════════════════════════════════════
+
+networks:
+  seismic_net:
+    driver: bridge
+
+services:
+
+  # ──────────────────────────────
+  #  PREFECT WORKER — training-pool
+  #  Poll ke Prefect Server di Laptop 3
+  #  Eksekusi: ml_training_flow, aggregation_flow,
+  #            baseline_update_flow, backup_flow
+  # ──────────────────────────────
+  prefect-worker-training:
+    build:
+      context: ./prefect
+      dockerfile: Dockerfile
+    container_name: seismic_prefect_worker_training
+    restart: unless-stopped
+    command: prefect worker start --pool training-pool --name worker-training-laptop2
+    environment:
+      # ─── Point ke Prefect Server di LAPTOP 3 ───────────
+      PREFECT_API_URL: http://${LAPTOP3_IP:-192.168.1.10}:4200/api
+
+      # ─── MinIO di LAPTOP 3 ─────────────────────────────
+      MINIO_ENDPOINT: http://${LAPTOP3_IP:-192.168.1.10}:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-seismic_admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-seismic_secret_2024}
+
+      # ─── PostgreSQL di LAPTOP 3 ────────────────────────
+      POSTGRES_URL: postgresql://${LAPTOP3_IP:-192.168.1.10}:5432/${POSTGRES_DB:-seismic_db}
+      POSTGRES_USER: ${POSTGRES_USER:-seismic_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-seismic_pass_2024}
+
+      # ─── ML Training Config ────────────────────────────
+      MODEL_BUCKET: trained-models
+      HISTORICAL_BUCKET: historical-earthquake
+      FEATURES_BUCKET: processed-features
+
+    volumes:
+      - ./prefect:/app          # kode flow
+      - ./models:/app/models    # model code (lstm/, prophet/, dll)
+      - ./logs:/app/logs
+    networks:
+      - seismic_net
+    # Resource limit — training bisa berat
+    deploy:
+      resources:
+        limits:
+          memory: 8G             # sesuaikan dengan RAM laptop 2
+        reservations:
+          memory: 4G
+
+  # ──────────────────────────────
+  #  PREFECT DEPLOYMENT — register flow ke server
+  #  Jalankan SEKALI setelah worker pertama kali naik
+  #  Command: docker compose --profile deploy run prefect-deploy
+  # ──────────────────────────────
+  prefect-deploy:
+    build:
+      context: ./prefect
+      dockerfile: Dockerfile
+    container_name: seismic_prefect_deploy_training
+    command: python deploy.py --pool training-pool
+    environment:
+      PREFECT_API_URL: http://${LAPTOP3_IP:-192.168.1.10}:4200/api
+      MINIO_ENDPOINT: http://${LAPTOP3_IP:-192.168.1.10}:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-seismic_admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-seismic_secret_2024}
+      POSTGRES_URL: postgresql://${LAPTOP3_IP:-192.168.1.10}:5432/${POSTGRES_DB:-seismic_db}
+      POSTGRES_USER: ${POSTGRES_USER:-seismic_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-seismic_pass_2024}
+      MODEL_BUCKET: trained-models
+      HISTORICAL_BUCKET: historical-earthquake
+      FEATURES_BUCKET: processed-features
+    volumes:
+      - ./prefect:/app
+      - ./models:/app/models
+    networks:
+      - seismic_net
+    profiles:
+      - deploy
+    restart: "no"
